@@ -1,0 +1,433 @@
+---
+title: "LVIS Analysis Autism Mansucript 2022"
+author: "Elena Tenenbaum and Adam Naples"
+date: "3/8/2021"
+output: html_document
+---
+```{r}
+#install.packages('psych')
+library(expss)
+library(psych)
+library(ggplot2)
+library(ggpubr)
+library(ggsci)
+library(tidyverse)
+library(tidyr)
+library(broom)
+library(corrplot)
+library(mice)
+library(paran)
+library(Hmisc)
+library(ppcor)
+library(gtsummary)
+library(readxl)
+```
+
+```{r}
+#read in data file
+set.seed(2747)
+lvisCollapse <- read.csv("LVIS_Data.csv")
+
+#remove out of age range participants
+lvisCollapse<-lvisCollapse[which(lvisCollapse$age<10),]
+
+#extracts LVIS data only
+lvis_data<-lvisCollapse[,20:53]
+#imputes missing using MICE
+imputed_Data <- mice(lvis_data, m=5, maxit = 50, method = 'pmm', seed = 500)
+summary(imputed_Data)
+#randomly selects 2nd imputed dataset
+completeData <- complete(imputed_Data,2)
+
+#runs Monte Carlo simulation to determine number of factors to extract - returns 6 
+paran(completeData, iterations=0, centile=0, quietly=FALSE,
+status=TRUE, all=FALSE, cfa=FALSE, graph=FALSE,
+color=TRUE, col=c("black","red","blue"),
+lty=c(1,2,3), lwd=1, legend=TRUE, file="",
+width=640, height=640, grdevice="png", seed=0, mat=NA, n=NA)
+
+cortest.bartlett(completeData)
+KMO(completeData)
+
+#this is tough to interpret and was rejected in favor of 2 factor model below
+pc6<-principal(completeData,nfactors=6,rotate="oblimin")
+pc6
+print.psych(pc6,cut=.3,sort=TRUE)
+plot(pc6$values,type="b")
+
+#this makes sense given scree plot and is more interpretable
+pc2<-principal(completeData,nfactors=2,rotate="oblimin")
+pc2
+print.psych(pc2,cut=.3,sort=TRUE)
+plot(pc2$values,type="b")
+```
+
+#creates LVIS score based on the first factor of 2 factor PCA
+```{r}
+#lvis_data<-completeData #commenting this line so that data will be consistent and stop pulling from imputed data set. this may result in errors later due to missing data.
+
+#replacing NAs in lvis_data with 0 so that those scores will be included in full sample
+lvis_data[is.na(lvis_data)]=0
+
+lvis_data$lvis_SS<-(lvis_data$lvis_7+lvis_data$lvis_28+lvis_data$r3+lvis_data$lvis_11+lvis_data$lvis_31+lvis_data$lvis_33+lvis_data$lvis_26+lvis_data$lvis_32+lvis_data$lvis_27+lvis_data$lvis_30+lvis_data$lvis_35+lvis_data$r2+lvis_data$lvis_15+lvis_data$lvis_34+lvis_data$r1+lvis_data$lvis_14+lvis_data$lvis_16)
+lvisCollapse$lvis_SS<-lvis_data$lvis_SS
+summary(lvis_data$lvis_SS)
+sd(lvis_data$lvis_SS)
+
+
+#creates an atypical score based on factor 2 of PCA
+lvis_data$lvis_AT<-(lvis_data$lvis_23+lvis_data$lvis_24+lvis_data$lvis_19+lvis_data$lvis_37+lvis_data$lvis_21+lvis_data$lvis_10+lvis_data$lvis_18+lvis_data$lvis_36+lvis_data$lvis_22+lvis_data$lvis_20+lvis_data$lvis_38+lvis_data$lvis_12+lvis_data$lvis_13+lvis_data$lvis_25)
+lvisCollapse$lvis_AT<-lvis_data$lvis_AT
+summary(lvis_data$lvis_AT)
+sd(lvis_data$lvis_AT)
+```
+#CORRELATION MATRIX
+```{r}
+#provides correlations for the factors included in the lvis_SS, replacing redudant items with the combined items.
+L_VIS_Corr_PCA<-lvis_data[,c("lvis_7",
+"lvis_28", "r3","lvis_11","lvis_31","lvis_33","lvis_26","lvis_32","lvis_27","lvis_30","lvis_35","r2","lvis_15",
+"lvis_34","r1","lvis_14","lvis_16","lvis_29","lvis_8","lvis_23","lvis_24","lvis_19","lvis_37","lvis_21",
+"lvis_10","lvis_18","lvis_36","lvis_22","lvis_20","lvis_38","lvis_13","lvis_12","lvis_25","lvis_9")]
+
+
+#prints correlation table
+mcor<-round(cor(L_VIS_Corr_PCA,method="pearson",use="complete.obs"),2)
+mcor[mcor == 1] <- NA
+summary(mcor)
+
+max(mcor)
+
+#identifies correlations greater than .8
+mcor[mcor>.8&mcor<1] #nothing greater than .8 identified
+```
+
+
+Demographics
+```{r}
+lvisCollapse %>% 
+  select(age,sex,ados_module,group3) %>% 
+  tbl_summary(by = group3,statistic = all_continuous() ~ "{mean} ({sd})") %>% 
+  add_overall() %>% 
+  add_n() %>% 
+  add_stat_label()
+
+#Table 2
+lvisCollapse %>% 
+  select(group3,lvis_SS,pls_acss,pls_ecss,pls_totae,vine_com_std_score,vine_soc_std_score,vine_dls_std_score,vine_ms_std_score,binet_nv_stand_score,binet_v_stand_score) %>%
+  tbl_summary(by = group3,statistic = list(all_continuous() ~ "{mean} ({sd})"), digits = list(all_continuous() ~ c(1, 1))) %>% 
+  add_n() %>% 
+  add_overall() %>%
+  add_stat_label() 
+```
+
+
+
+
+VABS scatterplots
+```{r}
+#runs correlations/scatterplots with sumscore for VABS
+
+#assigns labels for groups
+lvisCollapse$group3str<-car::recode(lvisCollapse$group3,"1='ASD';2='DLD';3='TD'")
+
+#pulls together VABS scores and lvis_SS with age and group
+L_VIS_VABS <- lvisCollapse[,c("vine_com_std_score","vine_dls_std_score","vine_soc_std_score", "vine_ms_std_score","lvis_SS","group3str","age")]
+#creates long file so that PLS scores can be facet wrapped in figures
+VABS<-gather(L_VIS_VABS,key="VABS", value="Score", na.rm=FALSE,-lvis_SS,-group3str,-age)
+#provides labels for the VABS scores
+VABS_labels <- c(vine_com_std_score="Communication",vine_dls_std_score="Daily Living",vine_soc_std_score="Socialization",vine_ms_std_score="Motor")
+
+#scatterplot for VABS with color
+Figure_2c<-ggplot(VABS, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+  labs(title="",
+       x="LVIS Composite Communication Scores", y = "Vineland Standard Score")   +
+  facet_grid(. ~ VABS)+
+  facet_grid(. ~ VABS, labeller=labeller(VABS = VABS_labels))+
+  scale_fill_discrete(name="Group")+
+  theme(legend.title=element_blank())
+Figure_2c
+
+
+#scatterplot for VABS with grayscale
+Figure_2g<-ggplot(VABS, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+  scale_color_manual(values=c("#000000", "#949494", "#C6C6C6"))+
+  labs(title="",
+       x="LVIS Composite Communication Scores", y = "Vineland Standard Score")   +
+  facet_grid(. ~ VABS)+
+  facet_grid(. ~ VABS, labeller=labeller(VABS = VABS_labels))+
+  scale_fill_discrete(name="Group")+
+  theme(legend.title=element_blank())
+
+#creates scatter plots for VABS scores with blues for poster
+Figure_2b<-ggplot(VABS, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(size = 1.5,aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+scale_color_manual(values=c("blue4", "#56B4E9", "#0072B2"))+
+labs(title="",
+       x="\n LVIS Composite Communication Scores", y = "Vineland Standard Score \n")   +
+  facet_grid(. ~ VABS)+
+  facet_grid(. ~ VABS, labeller=labeller(VABS = VABS_labels))+
+  scale_fill_discrete(name="Group")+
+theme(legend.title=element_blank(), text=element_text(size=19,  family="serif"),panel.grid.major = element_blank(), panel.grid.minor = element_blank(),legend.text = element_text(margin = margin(l = 10, unit = "pt")))+
+theme(axis.text.x= element_text(size=10))+
+theme(axis.text.y= element_text(size=10))
+Figure_2b
+
+
+tiff(filename = "Figure_2.tif", height = 12, width = 17, units = 'cm',compression = "lzw", res = 300)
+plot(Figure_2c)
+dev.off()
+
+```
+#SCATTERPLOTS FOR PLS SCORES
+#this is still missing the grayscale and blue color schemes - waiting for the standard scores of PLS and will then finalize. 
+```{r}
+L_VIS_PLS <- lvisCollapse[,c("pls_totss","pls_acss","pls_ecss","lvis_SS","group3str","age")]
+PLS<-gather(L_VIS_PLS,key="PLS", value="Score", na.rm=FALSE,-lvis_SS,-group3str,-age)
+PLS_labels <- c(pls_totss="Total",pls_acss="Receptive",pls_ecss="Expressive")
+
+#scatterplot for PLS with color
+Figure_1c<-ggplot(PLS, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+  labs(title="",
+       x="LVIS Composite Communication Scores", y = "PLS Standard Score")   +
+  facet_grid(. ~ PLS)+
+  facet_grid(. ~ PLS, labeller=labeller(PLS = PLS_labels))+
+  scale_fill_discrete(name="Group")+
+  theme(legend.title=element_blank())
+Figure_1c
+
+
+tiff(filename = "Figure_1.tif", height = 12, width = 17, units = 'cm',compression = "lzw", res = 300)
+plot(Figure_1c)
+dev.off()
+
+
+```
+#SCATTERPLOTS FOR SB SCORES
+```{r}
+L_VIS_SB <- lvisCollapse[,c("binet_v_stand_score","binet_nv_stand_score","lvis_SS","group3str","age")]
+SB<-gather(L_VIS_SB,key="SB", value="Score", na.rm=FALSE,-lvis_SS,-group3str,-age)
+SB_labels <- c(binet_v_stand_score="Verbal",binet_nv_stand_score="NonVerbal")
+
+#scatterplot for SB with color
+Figure_3c<-ggplot(SB, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+  labs(title="",
+       x="LVIS Composite Communication Scores", y = "Stanford Binet Standard Score")   +
+  facet_grid(. ~ SB)+
+  facet_grid(. ~ SB, labeller=labeller(SB = SB_labels))+
+  scale_fill_discrete(name="Group")+
+  theme(legend.title=element_blank())
+Figure_3c
+
+#scatterplot for SB with grayscale
+Figure_3g<-ggplot(SB, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+  scale_color_manual(values=c("#000000", "#949494", "#C6C6C6"))+
+  labs(title="",
+       x="LVIS Composite Communication Scores", y = "Stanford Binet Score")   +
+  facet_grid(. ~ SB)+
+  facet_grid(. ~ SB, labeller=labeller(SB = SB_labels))+
+  scale_fill_discrete(name="Group")+
+  theme(legend.title=element_blank())
+Figure_3g
+
+#scatterplot for SB with blues for poster
+Figure_3b<-ggplot(SB, aes(x=lvis_SS, y=Score, shape=group3str, color=group3str)) +
+  theme_set(theme_minimal())+
+  geom_point(aes(shape=group3str)) +    # Use hollow circles
+  geom_smooth(method=lm)+   # Add linear regression line (by default includes 95% confidence region)
+  scale_color_manual(values=c("blue4", "#56B4E9", "#0072B2"))+
+  labs(title="",
+       x="LVIS Composite Communication Scores", y = "Stanford Binet Score")   +
+  facet_grid(. ~ SB)+
+  facet_grid(. ~ SB, labeller=labeller(SB = SB_labels))+
+  scale_fill_discrete(name="Group")+
+  theme(legend.title=element_blank(), text=element_text(size=19,  family="serif"),panel.grid.major = element_blank(), panel.grid.minor = element_blank(),legend.text = element_text(margin = margin(l = 10, unit = "pt")))+
+theme(axis.text.x= element_text(size=10))+
+theme(axis.text.y= element_text(size=10))
+Figure_3b
+
+
+tiff(filename = "Figure_3.tif", height = 12, width = 17, units = 'cm',compression = "lzw", res = 300)
+plot(Figure_3c)
+dev.off()
+
+
+```
+Correlation Matrices all participants
+```{r}
+
+
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+    )
+}
+
+#Correlations with full sample
+L_VIS_VABS_Corr <- L_VIS_VABS[,c("vine_com_std_score","vine_dls_std_score","vine_soc_std_score", "vine_ms_std_score","lvis_SS","age")]
+VABS_CM<-rcorr(as.matrix(L_VIS_VABS_Corr))
+all_VABS<-tidy(VABS_CM)
+all_VABS
+
+L_VIS_PLS_Corr <- L_VIS_PLS[,c("pls_totss","pls_acss","pls_ecss","lvis_SS","age")]
+PLS_CM<-rcorr(as.matrix(L_VIS_PLS_Corr))
+all_PLS<-tidy(PLS_CM)
+all_PLS
+
+L_VIS_SB_Corr <- L_VIS_SB[,c("binet_v_stand_score","binet_nv_stand_score","lvis_SS","age")]
+SB_CM<-rcorr(as.matrix(L_VIS_SB_Corr))
+all_SB<-tidy(SB_CM)
+all_SB
+```
+Correlation Matrices ASD only
+```{r}
+#Correlations with ASD Only
+L_VIS_VABS_Corr_ASD <- L_VIS_VABS[which(L_VIS_VABS$group3str=="ASD"),c("vine_com_std_score","vine_dls_std_score","vine_soc_std_score", "vine_ms_std_score","lvis_SS","age")]
+VABS_CM_ASD<-rcorr(as.matrix(L_VIS_VABS_Corr_ASD))
+td_VABS_ASD<-tidy(VABS_CM_ASD)
+td_VABS_ASD
+
+L_VIS_PLS_Corr_ASD <- L_VIS_PLS[which(L_VIS_PLS$group3str=="ASD"),c("pls_totss","pls_acss","pls_ecss","lvis_SS","age")]
+PLS_CM_ASD<-rcorr(as.matrix(L_VIS_PLS_Corr_ASD))
+td_PLS_ASD<-tidy(PLS_CM_ASD)
+td_PLS_ASD
+
+L_VIS_SB_Corr_ASD <- L_VIS_SB[which(L_VIS_SB$group3str=="ASD"),c("binet_v_stand_score","binet_nv_stand_score","lvis_SS","age")]
+SB_CM_ASD<-rcorr(as.matrix(L_VIS_SB_Corr_ASD))
+td_SB_ASD<-tidy(SB_CM_ASD)
+td_SB_ASD
+```
+
+```{r}
+
+#Correlations with DLD Only
+L_VIS_VABS_Corr_DLD <- L_VIS_VABS[which(L_VIS_VABS$group3str=="DLD"),c("vine_com_std_score","vine_dls_std_score","vine_soc_std_score", "vine_ms_std_score","lvis_SS","age")]
+VABS_CM_DLD<-rcorr(as.matrix(L_VIS_VABS_Corr_DLD))
+td_VABS_DLD<-tidy(VABS_CM_DLD)
+td_VABS_DLD
+
+L_VIS_PLS_Corr_DLD <- L_VIS_PLS[which(L_VIS_PLS$group3str=="DLD"),c("pls_totss","pls_acss","pls_ecss","lvis_SS","age")]
+PLS_CM_DLD<-rcorr(as.matrix(L_VIS_PLS_Corr_DLD))
+td_PLS_DLD<-tidy(PLS_CM_DLD)
+td_PLS_DLD
+
+L_VIS_SB_Corr_DLD <- L_VIS_SB[which(L_VIS_SB$group3str=="DLD"),c("binet_v_stand_score","binet_nv_stand_score","lvis_SS","age")]
+SB_CM_DLD<-rcorr(as.matrix(L_VIS_SB_Corr_DLD))
+td_SB_DLD<-tidy(SB_CM_DLD)
+td_SB_DLD
+
+```
+
+```{r}
+#Correlations with TD Only
+L_VIS_VABS_Corr_TD <- L_VIS_VABS[which(L_VIS_VABS$group3str=="TD"),c("vine_com_std_score","vine_dls_std_score","vine_soc_std_score", "vine_ms_std_score","lvis_SS","age")]
+VABS_CM_TD<-rcorr(as.matrix(L_VIS_VABS_Corr_TD))
+td_VABS_TD<-tidy(VABS_CM_TD)
+td_VABS_TD
+
+L_VIS_PLS_Corr_TD <- L_VIS_PLS[which(L_VIS_PLS$group3str=="TD"),c("pls_totss","pls_acss","pls_ecss","lvis_SS","age")]
+PLS_CM_TD<-rcorr(as.matrix(L_VIS_PLS_Corr_TD))
+td_PLS_TD<-tidy(PLS_CM_TD)
+td_PLS_TD
+
+L_VIS_SB_Corr_TD <- L_VIS_SB[which(L_VIS_SB$group3str=="TD"),c("binet_v_stand_score","binet_nv_stand_score","lvis_SS","age")]
+SB_CM_TD<-rcorr(as.matrix(L_VIS_SB_Corr_TD))
+td_SB_TD<-tidy(SB_CM_TD)
+td_SB_TD
+
+```
+
+ADOS correlations
+```{r}
+#pull in ADOS scores 
+
+L_VIS_DATA_ADOS <- read.csv("LVIS_Data.csv")
+#reduces to appropriate age range
+L_VIS_DATA_ADOS <-L_VIS_DATA_ADOS[which(L_VIS_DATA_ADOS$age<10),]
+
+#merge lvisCollapse with ADOS CSS
+lvisCollapse <- merge(lvisCollapse,L_VIS_DATA_ADOS,by="ID")
+#this includes data error repair identified by Adam in email exchange dated 1/19/22
+
+L_VIS_ADOS <- lvisCollapse[,c("ADOS_CSS.y","ADOS_CSS_SA.y","ADOS_CSS_RRB.y","lvis_SS","lvis_AT","group3str","age.y")]
+#creates long file so that ADOS scores can be facet wrapped in figures
+ADOS<-gather(L_VIS_ADOS,key="ADOS", value="Score", na.rm=FALSE,-lvis_SS,-group3str,-age.y)
+#provides labels for the ADOS scores
+ADOS_labels <- c(ADOS_CSS.y="ADOS Severity Score",ADOS_CSS_SA.y="ADOS Social Affect Severity Score",ADOS_CSS_RRB.y="ADOS RRB Severity Score")
+
+L_VIS_ADOS$ADOS_CSS.y<-as.double(L_VIS_ADOS$ADOS_CSS.y)
+L_VIS_ADOS$ADOS_CSS_SA.y<-as.double(L_VIS_ADOS$ADOS_CSS_SA.y)
+L_VIS_ADOS$ADOS_CSS_RRB.y<-as.double(L_VIS_ADOS$ADOS_CSS_RRB.y)
+L_VIS_ADOS$age.y<-as.double(L_VIS_ADOS$age.y)
+
+#ASD only
+L_VIS_ADOS_Corr_ASD <- L_VIS_ADOS[which(L_VIS_ADOS$group3str=="ASD"),c("ADOS_CSS.y","ADOS_CSS_SA.y","ADOS_CSS_RRB.y","lvis_SS","lvis_AT","age.y")]
+ADOS_CM_ASD<-rcorr(as.matrix(L_VIS_ADOS_Corr_ASD))
+td_ADOS_ASD<-tidy(ADOS_CM_ASD)
+td_ADOS_ASD
+
+
+
+```
+Calculate LVIS Communication Ability Scores by Group and MV status
+```{r}
+
+lvis_MV<-read.csv("LVIS_MV_NID.csv")
+lvisCollapse <- merge(lvisCollapse,lvis_MV,by="ID")
+MV_ASD<- lvisCollapse[which(lvisCollapse$group3str=="ASD"),]
+
+MV_ASD %>% 
+  select(age.x,sex.x,ados_module.x,group3.y,lvis_NVnow) %>% 
+  tbl_summary(by = lvis_NVnow,statistic = all_continuous() ~ "{mean} ({sd})") %>% 
+  add_n() %>% 
+  add_stat_label()
+
+MV_ASD %>% 
+  select(group3.y,lvis_SS,pls_acss.x,pls_ecss.x,pls_totae.x,vine_com_std_score.x,vine_soc_std_score.x,vine_dls_std_score.x,vine_ms_std_score.x,binet_nv_stand_score.x,binet_v_stand_score.x,lvis_NVnow, ADOS_CSS.x, ADOS_CSS_SA.x,ADOS_CSS_RRB.x) %>%
+  tbl_summary(by = lvis_NVnow,statistic = list(all_continuous() ~ "{mean} ({sd})"), digits = list(all_continuous() ~ c(1, 1))) %>% 
+  add_n() %>% 
+  add_stat_label() 
+
+#it won't give means of ADOS SS cause it thinks they are factors, so kludgy solution to follow
+
+MV_ASD$ADOS_CSS_SA.y<-as.numeric(MV_ASD$ADOS_CSS_SA.y)
+
+MV_ASD_Verbal<- MV_ASD[which(MV_ASD$lvis_NVnow==0),]
+MV_ASD_MV<- MV_ASD[which(MV_ASD$lvis_NVnow==1),]
+
+summary(MV_ASD_Verbal$ADOS_CSS_SA.x)
+sd(MV_ASD_Verbal$ADOS_CSS_SA.x, na.rm = TRUE)
+
+summary(MV_ASD_Verbal$ADOS_CSS_RRB.x)
+sd(MV_ASD_Verbal$ADOS_CSS_RRB.x, na.rm = TRUE)
+
+summary(MV_ASD_MV$ADOS_CSS_SA.x)
+sd(MV_ASD_MV$ADOS_CSS_SA.x, na.rm = TRUE)
+
+summary(MV_ASD_MV$ADOS_CSS_RRB.x)
+sd(MV_ASD_MV$ADOS_CSS_RRB.x, na.rm = TRUE)
+
+```
+
+
+
